@@ -73,6 +73,8 @@
 #define GetProcAddress (void *)GetProcAddress
 #endif
 
+#define LODWORD(ull) ((DWORD)((ULONGLONG)(ull) & 0x00000000ffffffff))
+
 static String format_error_message(DWORD id) {
 	LPWSTR messageBuffer = nullptr;
 	size_t size = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -3868,6 +3870,117 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 
 			return 0; // Jump back.
 		}
+
+		case WM_GESTURE: {
+			GESTUREINFO gi;
+			gi.cbSize = sizeof(gi);
+			BOOL bResult = GetGestureInfo((HGESTUREINFO)lParam, &gi);
+			BOOL bHandled = FALSE;
+
+			if (bResult) {
+				// now interpret the gesture
+				switch (gi.dwID) {
+					case GID_ZOOM: {
+						switch (gi.dwFlags) {
+							// helper variables
+							POINT ptZoomCenter;
+							double k;
+							case GF_BEGIN: {
+								_dwArguments = LODWORD(gi.ullArguments);
+								_ptFirst.x = gi.ptsLocation.x;
+								_ptFirst.y = gi.ptsLocation.y;
+								ScreenToClient(hWnd, &_ptFirst);
+								return 0;
+							} break;
+
+							default:
+								_ptSecond.x = gi.ptsLocation.x;
+								_ptSecond.y = gi.ptsLocation.y;
+								ScreenToClient(hWnd, &_ptSecond);
+
+								ptZoomCenter.x = (_ptFirst.x + _ptSecond.x) / 2;
+								ptZoomCenter.y = (_ptFirst.y + _ptSecond.y) / 2;
+
+								k = (double)(LODWORD(gi.ullArguments)) / (double)(_dwArguments);
+
+								Ref<InputEventMagnifyGesture> pg;
+								pg.instantiate();
+
+								pg->set_window_id(window_id);
+								pg->set_ctrl_pressed(control_mem);
+								pg->set_shift_pressed(shift_mem);
+								pg->set_alt_pressed(alt_mem);
+
+								pg->set_factor(k);
+								pg->set_position(Vector2(ptZoomCenter.x, ptZoomCenter.y));
+
+								_ptFirst = _ptSecond;
+								_dwArguments = LODWORD(gi.ullArguments);
+								if ((windows[window_id].window_has_focus || windows[window_id].is_popup) && pg->get_factor() != 1.0f) {
+									Input::get_singleton()->parse_input_event(pg);
+								}
+
+								return 0;
+								break;
+						}
+					} break;
+					case GID_PAN: {
+						Ref<InputEventPanGesture> pg;
+						pg.instantiate();
+
+						pg->set_window_id(window_id);
+						pg->set_ctrl_pressed(control_mem);
+						pg->set_shift_pressed(shift_mem);
+						pg->set_alt_pressed(alt_mem);
+
+						switch (gi.dwFlags) {
+							case GF_BEGIN: {
+								_ptFirst.x = gi.ptsLocation.x;
+								_ptFirst.y = gi.ptsLocation.y;
+								ScreenToClient(hWnd, &_ptFirst);
+								return 0;
+							} break;
+
+							default:
+								_ptSecond.x = gi.ptsLocation.x;
+								_ptSecond.y = gi.ptsLocation.y;
+								ScreenToClient(hWnd, &_ptSecond);
+
+								// We apply move operation of the object
+								POINT delta = { _ptFirst.x - _ptSecond.x, _ptFirst.y - _ptSecond.y };
+
+								pg->set_position(Vector2(_ptSecond.x, _ptSecond.y));
+								pg->set_delta(Vector2(delta.x, delta.y));
+								// print_line("d: " + itos(delta.x) + ", " + itos(delta.y));
+								_ptFirst = _ptSecond;
+								break;
+						}
+
+						if ((windows[window_id].window_has_focus || windows[window_id].is_popup) && pg->get_delta() != Vector2()) {
+							Input::get_singleton()->parse_input_event(pg);
+						}
+
+						return 0;
+					} break;
+					case GID_ROTATE:
+						// Code for rotation goes here
+						bHandled = TRUE;
+						break;
+					case GID_TWOFINGERTAP:
+						// Code for two-finger tap goes here
+						bHandled = TRUE;
+						break;
+					case GID_PRESSANDTAP:
+						// Code for roll over goes here
+						bHandled = TRUE;
+						break;
+					default:
+						// A gesture was not recognized
+						break;
+				}
+			}
+		} break;
+
 		case WM_MOUSELEAVE: {
 			if (window_mouseover_id == window_id) {
 				old_invalid = true;
@@ -5191,7 +5304,7 @@ DisplayServer::WindowID DisplayServerWindows::_create_window(WindowMode p_mode, 
 		}
 #endif
 
-		RegisterTouchWindow(wd.hWnd, 0);
+		// RegisterTouchWindow(wd.hWnd, 0);
 		DragAcceptFiles(wd.hWnd, true);
 
 		if ((tablet_get_current_driver() == "wintab") && wintab_available) {

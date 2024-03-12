@@ -450,6 +450,10 @@ class DisplayServerWindows : public DisplayServer {
 
 	WNDPROC user_proc = nullptr;
 
+	POINT _ptFirst; // first significant point of the gesture
+	POINT _ptSecond; // second significant point of the gesture
+	DWORD _dwArguments; // 4 bytes long argument
+
 	struct IndicatorData {
 		Callable callback;
 	};
